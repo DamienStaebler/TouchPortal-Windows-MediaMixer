@@ -46,6 +46,20 @@ volumeprocess = ["Master Volume", "Current app"]
 running = False
 pythoncom.CoInitialize()
 
+_last_state_values = {}
+_last_connector_values = {}
+
+def pushState(state_id, value):
+    value = str(value)
+    if _last_state_values.get(state_id) != value:
+        _last_state_values[state_id] = value
+        TPClient.stateUpdate(state_id, value)
+
+def pushConnectorValue(short_id, value):
+    if _last_connector_values.get(short_id) != value:
+        _last_connector_values[short_id] = value
+        TPClient.shortIdUpdate(short_id, value)
+
 dataMapper = {
             "Output": EDataFlow.eRender.value,
             "Input": EDataFlow.eCapture.value,
@@ -135,12 +149,12 @@ class WinAudioCallBack(MagicSession):
                 # AudioSessionStateInactive
                 """Sesssion is Inactive"""
                 g_log.info(f"{self.app_name} not active")
-                TPClient.stateUpdate(PLUGIN_ID + f".createState.{self.app_name}.active","False")
+                pushState(PLUGIN_ID + f".createState.{self.app_name}.active","False")
     
             elif new_state == AudioSessionState.Active:
                 """Session Active"""
                 g_log.info(f"{self.app_name} is an Active Session")
-                TPClient.stateUpdate(PLUGIN_ID + f".createState.{self.app_name}.active","True")
+                pushState(PLUGIN_ID + f".createState.{self.app_name}.active","True")
     
         if new_state == AudioSessionState.Expired:
             """Removing Expired States"""
@@ -154,12 +168,12 @@ class WinAudioCallBack(MagicSession):
         """
 
         if self.app_name not in audio_ignore_list:
-            TPClient.stateUpdate(PLUGIN_ID + f".createState.{self.app_name}.volume", str(round(new_volume*100)))
+            pushState(PLUGIN_ID + f".createState.{self.app_name}.volume", str(round(new_volume*100)))
             #print(f"{self.app_name} NEW VOLUME", str(round(new_volume*100)))
             app_connector_id =f"pc_{TP_PLUGIN_INFO['id']}_{TP_PLUGIN_CONNECTORS['APP control']['id']}|{TP_PLUGIN_CONNECTORS['APP control']['data']['appchoice']['id']}={self.app_name}"
 
             if app_connector_id in TPClient.shortIdTracker :
-                TPClient.shortIdUpdate(
+                pushConnectorValue(
                     TPClient.shortIdTracker[app_connector_id],
                     round(new_volume*100))
             """Checking for Current App If Its Active, Adjust it also"""
@@ -167,7 +181,7 @@ class WinAudioCallBack(MagicSession):
                 current_app_connector_id = f"pc_{TP_PLUGIN_INFO['id']}_{TP_PLUGIN_CONNECTORS['APP control']['id']}|{TP_PLUGIN_CONNECTORS['APP control']['data']['appchoice']['id']}=Current app"
 
                 if current_app_connector_id in TPClient.shortIdTracker :
-                    TPClient.shortIdUpdate(
+                    pushConnectorValue(
                         TPClient.shortIdTracker[current_app_connector_id],
                         int(new_volume*100) if os.path.basename(activeWindow) == self.app_name else 0)
 
@@ -178,7 +192,7 @@ class WinAudioCallBack(MagicSession):
             isDeleted = audioStateManager(self.app_name)
 
             if not isDeleted:
-                TPClient.stateUpdate(PLUGIN_ID + f".createState.{self.app_name}.muteState", "Muted" if muted else "Un-muted")
+                pushState(PLUGIN_ID + f".createState.{self.app_name}.muteState", "Muted" if muted else "Un-muted")
 
 def updateDevice(options, choiceId, instanceId=None):
     deviceList = list(audioSwitch.MyAudioUtilities.getAllDevices(options).keys())
@@ -249,44 +263,44 @@ def stateUpdate():
     updateSwitch = 1
     while running:
         sleep(0.5)
-        TPClient.stateUpdate(TP_PLUGIN_STATES['FocusedAPP']['id'], pygetwindow.getActiveWindowTitle())
+        pushState(TP_PLUGIN_STATES['FocusedAPP']['id'], pygetwindow.getActiveWindowTitle())
 
         # Update master volume
         master_volume = getMasterVolume()
         master_volume_connector_id = f"pc_{TP_PLUGIN_INFO['id']}_{TP_PLUGIN_CONNECTORS['APP control']['id']}|{TP_PLUGIN_CONNECTORS['APP control']['data']['appchoice']['id']}=Master Volume"
         if master_volume_connector_id in TPClient.shortIdTracker:
-            TPClient.shortIdUpdate(
+            pushConnectorValue(
                     TPClient.shortIdTracker[master_volume_connector_id],
                     master_volume)
         
-        TPClient.stateUpdate(TP_PLUGIN_STATES["master volume"]["id"], str(master_volume))
+        pushState(TP_PLUGIN_STATES["master volume"]["id"], str(master_volume))
 
         activeWindow = getActiveExecutablePath()
         current_app_connector_id = f"pc_{TP_PLUGIN_INFO['id']}_{TP_PLUGIN_CONNECTORS['APP control']['id']}|{TP_PLUGIN_CONNECTORS['APP control']['data']['appchoice']['id']}=Current app"
         if activeWindow != "" and activeWindow != None and (current_app_volume := AudioController(os.path.basename(activeWindow)).process_volume()):
             if current_app_connector_id in TPClient.shortIdTracker:
-                TPClient.shortIdUpdate(
+                pushConnectorValue(
                     TPClient.shortIdTracker[current_app_connector_id],
                     int(current_app_volume*100))
-            TPClient.stateUpdate(TP_PLUGIN_STATES['currentAppVolume']['id'], str(int(current_app_volume*100)))
+            pushState(TP_PLUGIN_STATES['currentAppVolume']['id'], str(int(current_app_volume*100)))
         else:
             if current_app_connector_id in TPClient.shortIdTracker:
-                TPClient.shortIdUpdate(
+                pushConnectorValue(
                     TPClient.shortIdTracker[current_app_connector_id],
                     0)
-            TPClient.stateUpdate(TP_PLUGIN_STATES['currentAppVolume']['id'], 0)
+            pushState(TP_PLUGIN_STATES['currentAppVolume']['id'], 0)
 
         if (updateSwitch == 1):
-            TPClient.stateUpdate(TP_PLUGIN_STATES["outputDevice"]["id"], getDevicebydata(EDataFlow.eRender.value, ERole.eMultimedia.value))
+            pushState(TP_PLUGIN_STATES["outputDevice"]["id"], getDevicebydata(EDataFlow.eRender.value, ERole.eMultimedia.value))
             updateSwitch = 2
         elif (updateSwitch == 2):
-            TPClient.stateUpdate(TP_PLUGIN_STATES["outputcommicationDevice"]["id"], getDevicebydata(EDataFlow.eRender.value, ERole.eCommunications.value))
+            pushState(TP_PLUGIN_STATES["outputcommicationDevice"]["id"], getDevicebydata(EDataFlow.eRender.value, ERole.eCommunications.value))
             updateSwitch = 3
         elif (updateSwitch == 3):
-            TPClient.stateUpdate(TP_PLUGIN_STATES["inputDevice"]["id"], getDevicebydata(EDataFlow.eCapture.value, ERole.eMultimedia.value))
+            pushState(TP_PLUGIN_STATES["inputDevice"]["id"], getDevicebydata(EDataFlow.eCapture.value, ERole.eMultimedia.value))
             updateSwitch = 4
         elif (updateSwitch == 4):
-            TPClient.stateUpdate(TP_PLUGIN_STATES["inputDeviceCommication"]["id"], getDevicebydata(EDataFlow.eCapture.value, ERole.eCommunications.value))
+            pushState(TP_PLUGIN_STATES["inputDeviceCommication"]["id"], getDevicebydata(EDataFlow.eCapture.value, ERole.eCommunications.value))
             updateSwitch = 1
         
         pythoncom.CoUninitialize()
